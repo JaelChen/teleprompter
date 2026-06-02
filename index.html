@@ -1,0 +1,1247 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <!-- iOS/Android「添加到主屏幕」后以独立全屏运行(无浏览器地址栏)。在浏览器内正常浏览时 iOS 仍会显示外壳,这是系统限制。 -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="提词器">
+  <title>横屏提词器</title>
+  <style>
+    /* 1. 变量与重置 */
+    :root {
+      --editor-bg: #0c0d11;
+      --editor-text: #f5f7fa;
+      --editor-muted: #8b93a7;
+      --accent: #21c08a;
+      --accent-2: #16a877;
+      --prompter-bg: #000000;
+      --prompter-text: #ffffff;
+      --control-bg: rgba(18, 18, 20, 0.86);
+      --control-border: rgba(255, 255, 255, 0.16);
+      --control-text: #f2f2f2;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
+      touch-action: manipulation;
+    }
+
+    button,
+    textarea,
+    input {
+      font: inherit;
+    }
+
+    button {
+      border: 0;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    /* 2. 横屏基础布局 */
+    .app {
+      width: 100vw;
+      min-height: 100dvh;
+    }
+
+    .rotate-tip,
+    .orientation-choice {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      place-items: center;
+      padding: 24px;
+      background: rgba(0, 0, 0, 0.82);
+      color: #ffffff;
+      text-align: center;
+      font-size: 24px;
+      line-height: 1.45;
+    }
+
+    .orientation-choice {
+      z-index: 60;
+      background: rgba(0, 0, 0, 0.78);
+    }
+
+    .orientation-choice.is-open {
+      display: grid;
+    }
+
+    .orientation-card {
+      width: min(520px, 90vw);
+      padding: 24px;
+      border-radius: 20px;
+      color: #f5f7fa;
+      background: rgba(22, 24, 28, 0.94);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
+      backdrop-filter: blur(12px);
+    }
+
+    .orientation-card h2 {
+      margin: 0 0 8px;
+      font-size: 24px;
+      letter-spacing: 0;
+    }
+
+    .orientation-card p {
+      margin: 0 0 18px;
+      color: var(--editor-muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .orientation-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .orientation-button,
+    .orientation-cancel {
+      min-height: 54px;
+      border-radius: 14px;
+      color: #06140d;
+      background: linear-gradient(150deg, var(--accent), var(--accent-2));
+      font-weight: 800;
+      font-size: 18px;
+    }
+
+    .orientation-cancel {
+      width: 100%;
+      margin-top: 12px;
+      color: #f5f7fa;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      font-size: 15px;
+    }
+
+    /* 仅「提词模式」且所选朝向与设备朝向不一致时提示旋转；编辑主页永不遮挡 */
+    @media (orientation: portrait) {
+      body[data-mode="prompter"][data-orient="landscape"] .rotate-tip {
+        display: grid;
+      }
+    }
+
+    @media (orientation: landscape) {
+      body[data-mode="prompter"][data-orient="portrait"] .rotate-tip {
+        display: grid;
+      }
+    }
+
+    /* 3. 编辑模式（手机竖屏优先的主页设计） */
+    .editor {
+      position: relative;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      padding:
+        calc(20px + env(safe-area-inset-top))
+        max(20px, env(safe-area-inset-right))
+        calc(20px + env(safe-area-inset-bottom))
+        max(20px, env(safe-area-inset-left));
+      color: var(--editor-text);
+      background:
+        radial-gradient(130% 90% at 50% -15%, rgba(33, 192, 138, 0.16), transparent 60%),
+        linear-gradient(180deg, #101218 0%, var(--editor-bg) 100%);
+      overflow: hidden;
+    }
+
+    /* 顶部品牌栏 */
+    .editor__top {
+      flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .brand__mark {
+      display: grid;
+      place-items: center;
+      width: 36px;
+      height: 36px;
+      border-radius: 11px;
+      color: #06140d;
+      background: linear-gradient(150deg, var(--accent), var(--accent-2));
+      box-shadow: 0 8px 22px rgba(33, 192, 138, 0.28);
+    }
+
+    .brand__name {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+
+    .save-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      color: var(--editor-muted);
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+    }
+
+    .save-pill::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 3px rgba(33, 192, 138, 0.18);
+    }
+
+    /* 标题区 */
+    .editor__heading {
+      flex: 0 0 auto;
+      margin-bottom: 16px;
+    }
+
+    .editor__title {
+      margin: 0;
+      font-size: clamp(26px, 7vw, 38px);
+      font-weight: 800;
+      line-height: 1.15;
+      letter-spacing: -0.02em;
+    }
+
+    .editor__title em {
+      font-style: normal;
+      color: var(--accent);
+    }
+
+    .editor__hint {
+      margin: 9px 0 0;
+      color: var(--editor-muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    /* 稿子输入纸面 */
+    .paper {
+      position: relative;
+      flex: 1 1 auto;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      border-radius: 18px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.02));
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+      overflow: hidden;
+      transition: border-color 0.18s ease, box-shadow 0.18s ease;
+    }
+
+    .paper:focus-within {
+      border-color: rgba(33, 192, 138, 0.55);
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45), 0 0 0 3px rgba(33, 192, 138, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    }
+
+    .script-input {
+      flex: 1 1 auto;
+      width: 100%;
+      min-height: 0;
+      resize: none;
+      border: 0;
+      outline: none;
+      background: transparent;
+      padding: 20px 20px 8px;
+      color: var(--editor-text);
+      font-size: 19px;
+      line-height: 1.7;
+    }
+
+    .script-input::placeholder {
+      color: #5f6675;
+    }
+
+    .paper__meta {
+      flex: 0 0 auto;
+      display: flex;
+      justify-content: flex-end;
+      padding: 6px 18px 14px;
+      font-size: 12px;
+      letter-spacing: 0.03em;
+      color: var(--editor-muted);
+    }
+
+    /* 底部主操作 */
+    .editor__cta {
+      flex: 0 0 auto;
+      margin-top: 18px;
+    }
+
+    .start-button {
+      width: 100%;
+      min-height: 58px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 11px;
+      border-radius: 14px;
+      color: #06140d;
+      background: linear-gradient(150deg, var(--accent), var(--accent-2));
+      font-weight: 800;
+      font-size: 19px;
+      letter-spacing: 0.02em;
+      box-shadow: 0 14px 34px rgba(33, 192, 138, 0.32);
+      transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+    }
+
+    .start-button:active {
+      transform: translateY(1px);
+      filter: brightness(0.96);
+      box-shadow: 0 8px 20px rgba(33, 192, 138, 0.28);
+    }
+
+    .start-button__icon {
+      width: 0;
+      height: 0;
+      border-style: solid;
+      border-width: 7px 0 7px 12px;
+      border-color: transparent transparent transparent #06140d;
+    }
+
+    /* 4. 提词模式 */
+    .prompter {
+      position: relative;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      background: var(--prompter-bg);
+      color: var(--prompter-text);
+    }
+
+    .prompter__stage {
+      position: relative;
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: hidden;
+      background: var(--prompter-bg);
+    }
+
+    .viewport {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      background: var(--prompter-bg);
+    }
+
+    .viewport.is-mirrored {
+      transform: scaleX(-1);
+    }
+
+    .scroller {
+      --side-pad: 7vw;
+      width: 100%;
+      min-height: 100%;
+      padding: 52dvh var(--side-pad) 50dvh;
+      color: var(--prompter-text);
+      background: var(--prompter-bg);
+      font-size: 64px;
+      line-height: 1.4;
+      font-weight: 700;
+      white-space: pre-wrap;
+      overflow-wrap: break-word;
+      will-change: transform;
+      transform: translate3d(0, 0, 0);
+    }
+
+    .guide {
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 50%;
+      height: 2px;
+      z-index: 2;
+      pointer-events: none;
+      background: rgba(33, 192, 138, 0.75);
+      box-shadow: 0 -18px 0 rgba(33, 192, 138, 0.07), 0 18px 0 rgba(33, 192, 138, 0.07);
+    }
+
+    .countdown {
+      position: absolute;
+      inset: 0;
+      z-index: 3;
+      display: grid;
+      place-items: center;
+      pointer-events: none;
+      color: var(--prompter-text);
+      font-size: 28vh;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+      background: rgba(0, 0, 0, 0.35);
+    }
+
+    /* 5. 提词工具条与设置面板 */
+    .tool-strip {
+      position: fixed;
+      top: 0;
+      right: 0;
+      z-index: 20;
+      display: flex;
+      gap: 8px;
+      padding-top: calc(10px + env(safe-area-inset-top));
+      padding-right: calc(10px + env(safe-area-inset-right));
+    }
+
+    .icon-button {
+      width: 44px;
+      height: 44px;
+      display: grid;
+      place-items: center;
+      border-radius: 999px;
+      color: #ffffff;
+      background: rgba(255, 255, 255, 0.14);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+    }
+
+    .icon-button:active {
+      background: rgba(255, 255, 255, 0.24);
+    }
+
+    .icon-button svg {
+      width: 22px;
+      height: 22px;
+      display: block;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2.2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .icon-button .icon-fill {
+      fill: currentColor;
+      stroke: none;
+    }
+
+    .settings-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      display: grid;
+      place-items: center;
+      padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+      background: rgba(0, 0, 0, 0.45);
+    }
+
+    .settings-panel {
+      width: min(560px, 92vw);
+      max-height: min(86dvh, 680px);
+      overflow: auto;
+      padding: 20px;
+      border-radius: 20px;
+      color: #f5f7fa;
+      background: rgba(22, 24, 28, 0.92);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 26px 80px rgba(0, 0, 0, 0.58);
+      backdrop-filter: blur(12px);
+    }
+
+    .settings-panel h2 {
+      margin: 0 0 16px;
+      font-size: 20px;
+      letter-spacing: 0;
+    }
+
+    .settings-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .setting-tile,
+    .setting-row,
+    .setting-block {
+      border-radius: 14px;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+    }
+
+    .setting-tile {
+      min-height: 62px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 14px;
+      color: #f5f7fa;
+      text-align: left;
+      font-weight: 700;
+    }
+
+    .setting-tile.is-on {
+      border-color: rgba(33, 192, 138, 0.55);
+      box-shadow: inset 0 0 0 1px rgba(33, 192, 138, 0.22);
+    }
+
+    .switch-dot {
+      width: 34px;
+      height: 20px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.2);
+      position: relative;
+      flex: 0 0 auto;
+    }
+
+    .switch-dot::after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #ffffff;
+      transition: transform 0.16s ease;
+    }
+
+    .setting-tile.is-on .switch-dot {
+      background: #21c08a;
+    }
+
+    .setting-tile.is-on .switch-dot::after {
+      transform: translateX(14px);
+    }
+
+    .setting-block {
+      grid-column: 1 / -1;
+      padding: 14px;
+    }
+
+    .setting-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+      color: #f5f7fa;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .setting-value {
+      color: #21c08a;
+      font-variant-numeric: tabular-nums;
+      font-weight: 800;
+    }
+
+    .setting-block input[type="range"] {
+      width: 100%;
+      accent-color: #21c08a;
+    }
+
+    .segment-control {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+      padding: 5px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .segment-button {
+      min-height: 38px;
+      border-radius: 999px;
+      color: #d7dce5;
+      background: transparent;
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .segment-button.is-active {
+      color: #06140d;
+      background: #21c08a;
+    }
+
+    .settings-reset {
+      width: 100%;
+      min-height: 46px;
+      margin-top: 14px;
+      border-radius: 14px;
+      color: #f5f7fa;
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      font-weight: 800;
+    }
+
+    .settings-reset:active {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    @media (max-width: 740px) and (orientation: landscape) {
+      .editor {
+        padding: 12px 16px;
+      }
+
+      .editor__top {
+        margin-bottom: 10px;
+      }
+
+      /* 横屏纵向空间紧张：隐藏大标题，把空间让给输入区 */
+      .editor__heading {
+        display: none;
+      }
+
+      .script-input {
+        padding: 14px 16px 6px;
+        font-size: 17px;
+        line-height: 1.6;
+      }
+
+      .editor__cta {
+        margin-top: 12px;
+      }
+
+      .start-button {
+        min-height: 50px;
+        font-size: 18px;
+      }
+
+      .tool-strip {
+        gap: 6px;
+      }
+
+      .icon-button {
+        width: 40px;
+        height: 40px;
+      }
+
+      .settings-panel {
+        padding: 16px;
+      }
+    }
+
+    @media (orientation: portrait) {
+      .settings-backdrop {
+        align-items: end;
+      }
+
+      .settings-panel {
+        width: min(560px, 94vw);
+        max-height: 78dvh;
+      }
+
+      .settings-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <section class="editor" data-mode="editor">
+      <header class="editor__top">
+        <div class="brand">
+          <span class="brand__mark" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M6 14h12"/>
+              <path d="M6 18h7"/>
+              <path d="M12 10V3"/>
+              <path d="M8.5 6.5 12 3l3.5 3.5"/>
+            </svg>
+          </span>
+          <span class="brand__name">提词器</span>
+        </div>
+        <span class="save-pill">草稿自动保存</span>
+      </header>
+
+      <div class="editor__heading">
+        <h1 class="editor__title">写好稿子，<em>横屏开念</em></h1>
+        <p class="editor__hint">贴入或编辑你的稿子，点击开始后横屏匀速向上滚动。</p>
+      </div>
+
+      <div class="paper">
+        <textarea class="script-input" data-role="script-input" spellcheck="false" placeholder="在这里贴入或编辑你的稿子……"></textarea>
+        <div class="paper__meta"><span data-role="count">0 字</span></div>
+      </div>
+
+      <div class="editor__cta">
+        <button class="start-button" type="button" data-action="enter">
+          <span class="start-button__icon" aria-hidden="true"></span>
+          开始提词
+        </button>
+      </div>
+    </section>
+
+    <section class="prompter hidden" data-mode="prompter" aria-label="提词模式">
+      <div class="prompter__stage" data-role="stage">
+        <div class="viewport" data-role="viewport">
+          <div class="scroller" data-role="scroller"></div>
+        </div>
+        <div class="guide" aria-hidden="true"></div>
+        <div class="countdown hidden" data-role="countdown" aria-hidden="true">5</div>
+      </div>
+
+      <div class="tool-strip" aria-label="提词快捷操作">
+        <button class="icon-button" type="button" data-action="exit" aria-label="返回编辑">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/><path d="M21 12H9"/></svg>
+        </button>
+        <button class="icon-button" type="button" data-action="settings" aria-label="设置">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M19.4 15a1.8 1.8 0 0 0 .36 1.98l.04.04a2.1 2.1 0 0 1-2.97 2.97l-.04-.04A1.8 1.8 0 0 0 15 19.4a1.8 1.8 0 0 0-1 .54V20a2.1 2.1 0 0 1-4.2 0v-.06a1.8 1.8 0 0 0-1-.54 1.8 1.8 0 0 0-1.98.36l-.04.04a2.1 2.1 0 0 1-2.97-2.97l.04-.04A1.8 1.8 0 0 0 4.6 15a1.8 1.8 0 0 0-.54-1H4a2.1 2.1 0 0 1 0-4.2h.06a1.8 1.8 0 0 0 .54-1 1.8 1.8 0 0 0-.36-1.98l-.04-.04a2.1 2.1 0 0 1 2.97-2.97l.04.04A1.8 1.8 0 0 0 9 4.6a1.8 1.8 0 0 0 1-.54V4a2.1 2.1 0 0 1 4.2 0v.06a1.8 1.8 0 0 0 1 .54 1.8 1.8 0 0 0 1.98-.36l.04-.04a2.1 2.1 0 0 1 2.97 2.97l-.04.04A1.8 1.8 0 0 0 19.4 9c.2.36.38.7.54 1H20a2.1 2.1 0 0 1 0 4.2h-.06c-.16.3-.34.64-.54 1Z"/></svg>
+        </button>
+        <button class="icon-button" type="button" data-action="start" aria-label="开始或继续">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path class="icon-fill" d="M8 5v14l11-7Z"/></svg>
+        </button>
+        <button class="icon-button" type="button" data-action="pause" aria-label="暂停">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path class="icon-fill" d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+        </button>
+      </div>
+
+      <div class="settings-backdrop hidden" data-role="settings-backdrop">
+        <section class="settings-panel" data-role="settings-panel" aria-label="提词设置">
+          <h2>提词设置</h2>
+          <div class="settings-grid">
+            <button class="setting-tile" type="button" data-action="toggle-mirror">
+              <span>文字镜像</span>
+              <span class="switch-dot" aria-hidden="true"></span>
+            </button>
+            <button class="setting-tile" type="button" data-action="toggle-guide">
+              <span>提示线</span>
+              <span class="switch-dot" aria-hidden="true"></span>
+            </button>
+            <div class="setting-block">
+              <div class="setting-label"><span>倒计时</span><span class="setting-value" data-role="countdown-label">5 秒</span></div>
+              <div class="segment-control" aria-label="倒计时档位">
+                <button class="segment-button" type="button" data-countdown="0">关闭</button>
+                <button class="segment-button" type="button" data-countdown="3">3秒</button>
+                <button class="segment-button is-active" type="button" data-countdown="5">5秒</button>
+                <button class="segment-button" type="button" data-countdown="10">10秒</button>
+              </div>
+            </div>
+            <label class="setting-block">
+              <span class="setting-label"><span>播放速度</span><span class="setting-value" data-role="speed-value">40</span></span>
+              <input type="range" min="0" max="100" value="45" data-role="speed">
+            </label>
+            <label class="setting-block">
+              <span class="setting-label"><span>字号大小</span><span class="setting-value" data-role="font-value">64 px</span></span>
+              <input type="range" min="36" max="112" value="64" data-role="font-size">
+            </label>
+            <label class="setting-block">
+              <span class="setting-label"><span>宽窄</span><span class="setting-value" data-role="margin-value">7 vw</span></span>
+              <input type="range" min="5" max="30" step="1" value="7" data-role="margin">
+            </label>
+          </div>
+          <button class="settings-reset" type="button" data-action="reset">重置</button>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <div class="orientation-choice" data-role="orientation-choice" aria-hidden="true">
+    <div class="orientation-card">
+      <h2>选择提词方向</h2>
+      <p>选择后进入提词页，设置面板会自动打开。</p>
+      <div class="orientation-actions">
+        <button class="orientation-button" type="button" data-orientation="landscape">横屏</button>
+        <button class="orientation-button" type="button" data-orientation="portrait">竖屏</button>
+      </div>
+      <button class="orientation-cancel" type="button" data-action="orientation-cancel">取消</button>
+    </div>
+  </div>
+
+  <div class="rotate-tip" data-role="rotate-tip" aria-hidden="true">请横屏使用<br>旋转后自动进入提词布局</div>
+
+  <script>
+    /* 1. state */
+    const state = {
+      text: '',
+      mode: 'editor',
+      orientation: 'landscape',
+      isPlaying: false,
+      isMirrored: false,
+      showGuide: true,
+      settingsOpen: false,
+      fontSize: 64,
+      speed: 40,
+      sideMargin: 7,
+      countdownSec: 5,
+      position: 0,
+      phase: 'ready',
+    };
+
+    /* 2. dom */
+    const dom = {
+      editor: document.querySelector('[data-mode="editor"]'),
+      prompter: document.querySelector('[data-mode="prompter"]'),
+      scriptInput: document.querySelector('[data-role="script-input"]'),
+      stage: document.querySelector('[data-role="stage"]'),
+      viewport: document.querySelector('[data-role="viewport"]'),
+      scroller: document.querySelector('[data-role="scroller"]'),
+      guide: document.querySelector('.guide'),
+      orientationChoice: document.querySelector('[data-role="orientation-choice"]'),
+      orientationButtons: document.querySelectorAll('[data-orientation]'),
+      orientationCancel: document.querySelector('[data-action="orientation-cancel"]'),
+      rotateTip: document.querySelector('[data-role="rotate-tip"]'),
+      settingsButton: document.querySelector('[data-action="settings"]'),
+      startButton: document.querySelector('[data-action="start"]'),
+      pauseButton: document.querySelector('[data-action="pause"]'),
+      settingsBackdrop: document.querySelector('[data-role="settings-backdrop"]'),
+      settingsPanel: document.querySelector('[data-role="settings-panel"]'),
+      mirrorTile: document.querySelector('[data-action="toggle-mirror"]'),
+      guideTile: document.querySelector('[data-action="toggle-guide"]'),
+      countdownButtons: document.querySelectorAll('[data-countdown]'),
+      countdownLabel: document.querySelector('[data-role="countdown-label"]'),
+      speedValue: document.querySelector('[data-role="speed-value"]'),
+      fontValue: document.querySelector('[data-role="font-value"]'),
+      marginValue: document.querySelector('[data-role="margin-value"]'),
+      resetButton: document.querySelector('[data-action="reset"]'),
+      enterButton: document.querySelector('[data-action="enter"]'),
+      exitButton: document.querySelector('[data-action="exit"]'),
+      speedInput: document.querySelector('[data-role="speed"]'),
+      fontSizeInput: document.querySelector('[data-role="font-size"]'),
+      marginInput: document.querySelector('[data-role="margin"]'),
+      countdown: document.querySelector('[data-role="countdown"]'),
+      count: document.querySelector('[data-role="count"]'),
+    };
+
+    /* 3. storage */
+    const storage = {
+      key: 'teleprompter.text.v1',
+      timer: 0,
+      load() {
+        try {
+          return localStorage.getItem(this.key) || '';
+        } catch (error) {
+          return '';
+        }
+      },
+      save(text) {
+        window.clearTimeout(this.timer);
+        this.timer = window.setTimeout(() => {
+          try {
+            localStorage.setItem(this.key, text);
+          } catch (error) {
+            // 隐私模式或存储不可用时，降级为本次打开期间可用。
+          }
+        }, 180);
+      },
+    };
+
+    /* 4. scrollEngine */
+    const scrollEngine = {
+      frameId: 0,
+      lastTime: 0,
+      maxDistance: 0,
+      startOffset: 0,
+      calculateBounds() {
+        const stageHeight = dom.stage.clientHeight || window.innerHeight;
+        const contentHeight = dom.scroller.scrollHeight;
+        this.startOffset = 0;
+        this.maxDistance = Math.max(0, contentHeight - stageHeight);
+      },
+      draw() {
+        dom.scroller.style.transform = `translate3d(0, ${state.position}px, 0)`;
+      },
+      setStartPosition() {
+        state.position = this.startOffset;
+        this.draw();
+      },
+      tick(now) {
+        if (!this.lastTime) {
+          this.lastTime = now;
+        }
+
+        const dt = Math.min((now - this.lastTime) / 1000, 0.08);
+        this.lastTime = now;
+        state.position -= state.speed * dt;
+
+        if (Math.abs(state.position) >= this.maxDistance) {
+          state.position = -this.maxDistance;
+          this.draw();
+          controls.pause();
+          return;
+        }
+
+        this.draw();
+        this.frameId = requestAnimationFrame((time) => this.tick(time));
+      },
+      play() {
+        if (state.isPlaying) return;
+        state.isPlaying = true;
+        state.phase = 'playing';
+        this.lastTime = 0;
+        wakeLock.request();
+        this.frameId = requestAnimationFrame((time) => this.tick(time));
+      },
+      pause() {
+        state.isPlaying = false;
+        state.phase = 'paused';
+        cancelAnimationFrame(this.frameId);
+        this.frameId = 0;
+        this.lastTime = 0;
+      },
+      reset() {
+        countdown.stop();
+        this.pause();
+        this.calculateBounds();
+        this.setStartPosition();
+        state.phase = 'ready';
+        wakeLock.release();
+      },
+    };
+
+    /* 5. countdown */
+    const countdown = {
+      duration: 5,
+      timerId: 0,
+      remaining: 0,
+      start() {
+        this.stop();
+        if (state.countdownSec === 0) {
+          state.phase = 'playing';
+          scrollEngine.play();
+          return;
+        }
+
+        state.phase = 'counting';
+        state.isPlaying = false;
+        this.remaining = state.countdownSec;
+        dom.countdown.textContent = this.remaining;
+        dom.countdown.classList.remove('hidden');
+        wakeLock.request();
+        this.timerId = setInterval(() => {
+          this.remaining -= 1;
+          if (this.remaining <= 0) {
+            this.stop();
+            state.phase = 'playing';
+            scrollEngine.play();
+          } else {
+            dom.countdown.textContent = this.remaining;
+          }
+        }, 1000);
+      },
+      cancel() {
+        this.stop();
+        state.phase = 'ready';
+        state.isPlaying = false;
+        wakeLock.release();
+      },
+      stop() {
+        window.clearInterval(this.timerId);
+        this.timerId = 0;
+        this.remaining = 0;
+        dom.countdown.classList.add('hidden');
+      },
+    };
+
+    /* 6. wakeLock */
+    const wakeLock = {
+      sentinel: null,
+      async request() {
+        if (!('wakeLock' in navigator) || state.mode !== 'prompter') return;
+
+        try {
+          this.sentinel = await navigator.wakeLock.request('screen');
+          this.sentinel.addEventListener('release', () => {
+            this.sentinel = null;
+          });
+        } catch (error) {
+          this.sentinel = null;
+        }
+      },
+      async release() {
+        if (!this.sentinel) return;
+
+        try {
+          await this.sentinel.release();
+        } catch (error) {
+          // 已被浏览器释放时无需处理。
+        } finally {
+          this.sentinel = null;
+        }
+      },
+      bind() {
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible' && state.mode === 'prompter' && (state.phase === 'counting' || state.phase === 'playing')) {
+            this.request();
+          }
+        });
+      },
+    };
+
+    /* 7. controls */
+    const controls = {
+      speedFromSlider(value) {
+        const t = Number(value) / 100;
+        const min = 8;
+        const max = 180;
+        return min * Math.pow(max / min, t);
+      },
+      openOrientationChoice() {
+        dom.orientationChoice.classList.add('is-open');
+        dom.orientationChoice.setAttribute('aria-hidden', 'false');
+      },
+      closeOrientationChoice() {
+        dom.orientationChoice.classList.remove('is-open');
+        dom.orientationChoice.setAttribute('aria-hidden', 'true');
+      },
+      openSettings() {
+        if (state.phase === 'playing') {
+          this.pause();
+        }
+        state.settingsOpen = true;
+        dom.settingsBackdrop.classList.remove('hidden');
+        this.syncSettingsUi();
+      },
+      closeSettings() {
+        state.settingsOpen = false;
+        dom.settingsBackdrop.classList.add('hidden');
+      },
+      toggleSettings() {
+        if (state.settingsOpen) {
+          this.closeSettings();
+        } else {
+          this.openSettings();
+        }
+      },
+      applyFontSize() {
+        dom.scroller.style.fontSize = `${state.fontSize}px`;
+        dom.fontValue.textContent = `${state.fontSize} px`;
+        requestAnimationFrame(() => scrollEngine.calculateBounds());
+      },
+      applyMargin() {
+        dom.scroller.style.setProperty('--side-pad', `${state.sideMargin}vw`);
+        dom.marginValue.textContent = `${state.sideMargin} vw`;
+        requestAnimationFrame(() => scrollEngine.calculateBounds());
+      },
+      applyGuide() {
+        dom.guide.classList.toggle('hidden', !state.showGuide);
+        dom.guideTile.classList.toggle('is-on', state.showGuide);
+      },
+      applyMirror() {
+        dom.viewport.classList.toggle('is-mirrored', state.isMirrored);
+        dom.mirrorTile.classList.toggle('is-on', state.isMirrored);
+      },
+      applyCountdownSetting() {
+        dom.countdownLabel.textContent = state.countdownSec === 0 ? '关闭' : `${state.countdownSec} 秒`;
+        dom.countdownButtons.forEach((button) => {
+          button.classList.toggle('is-active', Number(button.dataset.countdown) === state.countdownSec);
+        });
+      },
+      syncSettingsUi() {
+        dom.speedValue.textContent = `${Math.round(state.speed)}`;
+        dom.fontValue.textContent = `${state.fontSize} px`;
+        dom.marginValue.textContent = `${state.sideMargin} vw`;
+        this.applyMirror();
+        this.applyGuide();
+        this.applyCountdownSetting();
+      },
+      updateCount() {
+        dom.count.textContent = `${dom.scriptInput.value.length} 字`;
+      },
+      startOrContinue() {
+        if (state.phase === 'ready') {
+          countdown.start();
+        } else if (state.phase === 'paused') {
+          scrollEngine.play();
+        }
+      },
+      pauseIfPlaying() {
+        if (state.phase === 'playing') {
+          this.pause();
+        }
+      },
+      handleStageTap() {
+        if (state.settingsOpen) {
+          this.closeSettings();
+        } else if (state.phase === 'ready') {
+          countdown.start();
+        } else if (state.phase === 'playing') {
+          this.pause();
+        } else if (state.phase === 'paused') {
+          scrollEngine.play();
+        }
+      },
+      pause() {
+        scrollEngine.pause();
+        wakeLock.release();
+      },
+      bind() {
+        dom.scriptInput.addEventListener('input', () => {
+          state.text = dom.scriptInput.value;
+          this.updateCount();
+          storage.save(state.text);
+        });
+
+        dom.enterButton.addEventListener('click', () => this.openOrientationChoice());
+        dom.orientationCancel.addEventListener('click', () => this.closeOrientationChoice());
+        dom.orientationButtons.forEach((button) => {
+          button.addEventListener('click', () => {
+            state.orientation = button.dataset.orientation;
+            this.closeOrientationChoice();
+            mode.enterPrompter();
+          });
+        });
+
+        dom.exitButton.addEventListener('click', () => mode.exitPrompter());
+        dom.settingsButton.addEventListener('click', () => this.toggleSettings());
+        dom.startButton.addEventListener('click', () => this.startOrContinue());
+        dom.pauseButton.addEventListener('click', () => this.pauseIfPlaying());
+        dom.resetButton.addEventListener('click', () => scrollEngine.reset());
+        dom.settingsBackdrop.addEventListener('click', () => this.closeSettings());
+        dom.settingsPanel.addEventListener('click', (event) => event.stopPropagation());
+        dom.mirrorTile.addEventListener('click', () => {
+          state.isMirrored = !state.isMirrored;
+          this.applyMirror();
+        });
+        dom.guideTile.addEventListener('click', () => {
+          state.showGuide = !state.showGuide;
+          this.applyGuide();
+        });
+        dom.countdownButtons.forEach((button) => {
+          button.addEventListener('click', () => {
+            state.countdownSec = Number(button.dataset.countdown);
+            this.applyCountdownSetting();
+          });
+        });
+
+        dom.speedInput.addEventListener('input', () => {
+          state.speed = this.speedFromSlider(dom.speedInput.value);
+          dom.speedValue.textContent = `${Math.round(state.speed)}`;
+        });
+
+        dom.fontSizeInput.addEventListener('input', () => {
+          state.fontSize = Number(dom.fontSizeInput.value);
+          this.applyFontSize();
+        });
+
+        dom.marginInput.addEventListener('input', () => {
+          state.sideMargin = Number(dom.marginInput.value);
+          this.applyMargin();
+        });
+
+        dom.stage.addEventListener('click', () => this.handleStageTap());
+
+        window.addEventListener('resize', () => {
+          window.clearTimeout(this.resizeTimer);
+          this.resizeTimer = window.setTimeout(() => scrollEngine.calculateBounds(), 120);
+        });
+
+        window.addEventListener('beforeunload', () => wakeLock.release());
+      },
+    };
+
+    /* 8. mode */
+    const mode = {
+      async enterPrompter() {
+        countdown.stop();
+        state.text = dom.scriptInput.value;
+        storage.save(state.text);
+        state.mode = 'prompter';
+        state.phase = 'ready';
+        document.body.setAttribute('data-mode', 'prompter');
+        document.body.setAttribute('data-orient', state.orientation);
+        dom.rotateTip.innerHTML = state.orientation === 'landscape'
+          ? '请横屏使用<br>旋转后自动进入提词布局'
+          : '请竖屏使用<br>旋转后自动进入提词布局';
+        dom.scroller.textContent = state.text.trim() || ' ';
+        dom.editor.classList.add('hidden');
+        dom.prompter.classList.remove('hidden');
+
+        controls.applyFontSize();
+        controls.applyMargin();
+        controls.applyMirror();
+        controls.applyGuide();
+        controls.applyCountdownSetting();
+        controls.openSettings();
+
+        await this.requestFullscreen();
+        requestAnimationFrame(() => {
+          scrollEngine.calculateBounds();
+          scrollEngine.setStartPosition();
+          state.isPlaying = false;
+          state.phase = 'ready';
+        });
+      },
+      async exitPrompter() {
+        if (state.phase === 'counting') {
+          countdown.cancel();
+        } else if (state.phase === 'playing') {
+          controls.pause();
+        } else {
+          countdown.stop();
+          wakeLock.release();
+        }
+        state.isPlaying = false;
+        state.mode = 'editor';
+        state.phase = 'ready';
+        controls.closeSettings();
+        document.body.setAttribute('data-mode', 'editor');
+        document.body.removeAttribute('data-orient');
+        dom.prompter.classList.add('hidden');
+        dom.editor.classList.remove('hidden');
+
+        if (document.fullscreenElement) {
+          try {
+            await document.exitFullscreen();
+          } catch (error) {
+            // 部分浏览器不允许脚本退出全屏，静默降级。
+          }
+        }
+      },
+      async requestFullscreen() {
+        const target = document.documentElement;
+        if (!target.requestFullscreen || document.fullscreenElement) return;
+
+        try {
+          await target.requestFullscreen();
+        } catch (error) {
+          // iOS Safari 等环境可能不支持，提词功能照常工作。
+        }
+      },
+    };
+
+    /* 9. init */
+    function init() {
+      document.body.setAttribute('data-mode', 'editor');
+      state.text = storage.load();
+      state.speed = controls.speedFromSlider(dom.speedInput.value);
+      state.sideMargin = Number(dom.marginInput.value);
+      dom.scriptInput.value = state.text;
+      controls.updateCount();
+      controls.applyFontSize();
+      controls.applyMargin();
+      controls.applyMirror();
+      controls.applyGuide();
+      controls.applyCountdownSetting();
+      controls.syncSettingsUi();
+      controls.bind();
+      wakeLock.bind();
+    }
+
+    init();
+  </script>
+</body>
+</html>
