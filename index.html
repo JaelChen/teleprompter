@@ -1010,6 +1010,8 @@
       openSettings() {
         if (state.phase === 'playing') {
           this.pause();
+        } else if (state.phase === 'counting') {
+          countdown.cancel();
         }
         state.settingsOpen = true;
         dom.settingsBackdrop.classList.remove('hidden');
