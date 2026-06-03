@@ -364,7 +364,7 @@
       --side-pad: 7vw;
       width: 100%;
       min-height: 100%;
-      padding: 52dvh var(--side-pad) 50dvh;
+      padding: 50dvh var(--side-pad) 50dvh;
       color: var(--prompter-text);
       background: var(--prompter-bg);
       font-size: 64px;
@@ -829,7 +829,9 @@
     /* 3. storage */
     const storage = {
       key: 'teleprompter.text.v1',
+      settingsKey: 'teleprompter.settings.v1',
       timer: 0,
+      settingsTimer: 0,
       load() {
         try {
           return localStorage.getItem(this.key) || '';
@@ -844,6 +846,23 @@
             localStorage.setItem(this.key, text);
           } catch (error) {
             // 隐私模式或存储不可用时，降级为本次打开期间可用。
+          }
+        }, 180);
+      },
+      loadSettings() {
+        try {
+          return JSON.parse(localStorage.getItem(this.settingsKey)) || null;
+        } catch (error) {
+          return null;
+        }
+      },
+      saveSettings(settings) {
+        window.clearTimeout(this.settingsTimer);
+        this.settingsTimer = window.setTimeout(() => {
+          try {
+            localStorage.setItem(this.settingsKey, JSON.stringify(settings));
+          } catch (error) {
+            // 设置存储不可用时，降级为本次打开期间可用。
           }
         }, 180);
       },
@@ -1060,12 +1079,55 @@
         this.applyGuide();
         this.applyCountdownSetting();
       },
+      persist() {
+        storage.saveSettings({
+          speedSlider: dom.speedInput.value,
+          fontSize: state.fontSize,
+          sideMargin: state.sideMargin,
+          isMirrored: state.isMirrored,
+          showGuide: state.showGuide,
+          countdownSec: state.countdownSec,
+        });
+      },
+      applySavedSettings() {
+        const saved = storage.loadSettings();
+        if (!saved) return;
+
+        if (saved.speedSlider !== undefined) {
+          dom.speedInput.value = saved.speedSlider;
+          state.speed = this.speedFromSlider(saved.speedSlider);
+        }
+
+        if (saved.fontSize !== undefined) {
+          state.fontSize = Number(saved.fontSize);
+          dom.fontSizeInput.value = state.fontSize;
+        }
+
+        if (saved.sideMargin !== undefined) {
+          state.sideMargin = Number(saved.sideMargin);
+          dom.marginInput.value = state.sideMargin;
+        }
+
+        if (typeof saved.isMirrored === 'boolean') {
+          state.isMirrored = saved.isMirrored;
+        }
+
+        if (typeof saved.showGuide === 'boolean') {
+          state.showGuide = saved.showGuide;
+        }
+
+        if ([0, 3, 5, 10].includes(Number(saved.countdownSec))) {
+          state.countdownSec = Number(saved.countdownSec);
+        }
+      },
       updateCount() {
         dom.count.textContent = `${dom.scriptInput.value.length} 字`;
       },
       startOrContinue() {
         if (state.phase === 'ready') {
           countdown.start();
+        } else if (state.phase === 'counting') {
+          countdown.cancel();
         } else if (state.phase === 'paused') {
           scrollEngine.play();
         }
@@ -1080,6 +1142,8 @@
           this.closeSettings();
         } else if (state.phase === 'ready') {
           countdown.start();
+        } else if (state.phase === 'counting') {
+          countdown.cancel();
         } else if (state.phase === 'playing') {
           this.pause();
         } else if (state.phase === 'paused') {
@@ -1117,31 +1181,37 @@
         dom.mirrorTile.addEventListener('click', () => {
           state.isMirrored = !state.isMirrored;
           this.applyMirror();
+          this.persist();
         });
         dom.guideTile.addEventListener('click', () => {
           state.showGuide = !state.showGuide;
           this.applyGuide();
+          this.persist();
         });
         dom.countdownButtons.forEach((button) => {
           button.addEventListener('click', () => {
             state.countdownSec = Number(button.dataset.countdown);
             this.applyCountdownSetting();
+            this.persist();
           });
         });
 
         dom.speedInput.addEventListener('input', () => {
           state.speed = this.speedFromSlider(dom.speedInput.value);
           dom.speedValue.textContent = `${Math.round(state.speed)}`;
+          this.persist();
         });
 
         dom.fontSizeInput.addEventListener('input', () => {
           state.fontSize = Number(dom.fontSizeInput.value);
           this.applyFontSize();
+          this.persist();
         });
 
         dom.marginInput.addEventListener('input', () => {
           state.sideMargin = Number(dom.marginInput.value);
           this.applyMargin();
+          this.persist();
         });
 
         dom.stage.addEventListener('click', () => this.handleStageTap());
@@ -1231,6 +1301,7 @@
       state.text = storage.load();
       state.speed = controls.speedFromSlider(dom.speedInput.value);
       state.sideMargin = Number(dom.marginInput.value);
+      controls.applySavedSettings();
       dom.scriptInput.value = state.text;
       controls.updateCount();
       controls.applyFontSize();

@@ -399,3 +399,70 @@ settingsOpen: false,        // 设置面板是否打开
 - [ ] 倒计时档位 关闭/3/5/10 均正确;继续(paused→播放)不倒计时。
 - [ ] 退出/重置无残留定时器;镜像、滚动、持久化等旧功能零回归。
 - [ ] 面板为深色玻璃风,黑底提词页无大面积白光;编辑主页视觉未变。
+
+---
+
+## 7. 第四轮迭代(Day 2:设置持久化 + 收尾,用户 2026-06-03 提出 —— 请实现)
+
+> 本轮只动 `index.html`,不要执行任何 git 操作。**范围扩展已获用户批准**:持久化不再"仅稿子文本"。
+
+### 🆕 A — 设置持久化(记住用户偏好)
+
+**目标**:除稿子文本外,**记住这些提词设置**,刷新/重开后自动恢复,免得每次重调:
+`字号 / 速度 / 宽窄 / 镜像 / 提示线 / 倒计时档位`。
+**不持久化**:`orientation`(每次进提词仍由横/竖屏选择层决定)、`position/phase` 等运行态。
+
+**实现要点:**
+
+1) 新增独立存储槽(与稿子分开,互不影响):
+```js
+storage.settingsKey = 'teleprompter.settings.v1';
+
+storage.loadSettings() {
+  try { return JSON.parse(localStorage.getItem(this.settingsKey)) || null; }
+  catch (e) { return null; }
+}
+storage.saveSettings(obj) {           // 防抖写入,同稿子的写法
+  window.clearTimeout(this.settingsTimer);
+  this.settingsTimer = setTimeout(() => {
+    try { localStorage.setItem(this.settingsKey, JSON.stringify(obj)); } catch (e) {}
+  }, 180);
+}
+```
+
+2) **存什么**:存"控件原始值"最稳(避免 speed 的指数映射来回换算出错)。建议存:
+```js
+{
+  speedSlider: <speed 滑块的 0–100 原始值>,   // = dom.speedInput.value
+  fontSize:    state.fontSize,                // 36–112
+  sideMargin:  state.sideMargin,              // 5–30
+  isMirrored:  state.isMirrored,              // bool
+  showGuide:   state.showGuide,               // bool
+  countdownSec:state.countdownSec             // 0/3/5/10
+}
+```
+
+3) **何时存**:在每个设置的事件处理末尾调用 `controls.persist()`(内部收集上面字段并 `storage.saveSettings`)——即 镜像/提示线/倒计时/速度/字号/宽窄 的监听里各加一行 `this.persist()`。
+
+4) **何时读**:`init()` 里,在 `controls.applyXxx()` 之前先 `applySavedSettings()`:
+   - 读到对象 → 写回 `state.*` 与各 DOM 控件(`dom.speedInput.value / fontSizeInput.value / marginInput.value`,以及 `state.speed = speedFromSlider(speedSlider)`)。
+   - 读不到(首次/隐私模式)→ 用现有默认值,流程不变。
+   - 之后照常 `applyFontSize/applyMargin/applyMirror/applyGuide/applyCountdownSetting/syncSettingsUi`,保证 UI 与 state 一致。
+
+5) try/catch 全包,存储不可用时静默降级为"本次有效"。
+
+**验证**:调好字号/速度/宽窄/镜像/提示线/倒计时 → 刷新页面 → 进提词,设置全部保持上次的值;隐私模式下不报错、用默认值。
+
+### 🆕 B — 收两个小尾巴
+
+1) **倒计时可取消**(原 P2):倒计时进行中,点「开始」图标或点正文都应取消倒计时回到待命。
+   - `controls.startOrContinue()` 增加:`else if (state.phase === 'counting') { countdown.cancel(); }`
+   - `controls.handleStageTap()` 增加:`else if (state.phase === 'counting') { countdown.cancel(); }`
+2) **首尾对称**:`.scroller` 顶部 padding `52dvh` → `50dvh`(即 `padding: 50dvh var(--side-pad) 50dvh;`),让首行/末行都精确落在中部基准线。
+
+### 7.x 验证清单
+- [ ] 改了任意设置 → 刷新 → 设置保持;稿子持久化照常、两个存储槽互不干扰。
+- [ ] 倒计时中点开始/点屏可取消回到待命。
+- [ ] 滚到开头/结尾,首行与末行都能对齐中部基准线。
+- [ ] 隐私模式/禁用存储时不报错,回退默认值。
+- [ ] 镜像分层、滚动引擎、Wake Lock、编辑页视觉等旧功能零回归。
